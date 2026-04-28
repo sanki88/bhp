@@ -1,9 +1,10 @@
 import { addVisitor } from "@/lib/visitors";
-import { questions } from "@/lib/questions";
+import { getQuestions } from "@/lib/question-store";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const questions = await getQuestions();
   const selectedQuestions = shuffle(questions).slice(0, 5).map((question) => ({
     id: question.id,
     text: question.text,
@@ -14,6 +15,7 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  const questions = await getQuestions();
   const payload = await request.json();
   const visitor = sanitizeVisitor(payload.visitor);
   const answers = payload.answers || {};

@@ -25,6 +25,7 @@ import {
   Typography,
 } from "@mui/material";
 import BadgeIcon from "@mui/icons-material/Badge";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import PlayCircleIcon from "@mui/icons-material/PlayCircle";
@@ -171,6 +172,7 @@ export default function VisitorTraining() {
           sx={{
             display: "flex",
             justifyContent: "flex-end",
+            gap: 1,
             flex: 1,
             mt: { xs: 2, md: 0 },
           }}
@@ -185,6 +187,17 @@ export default function VisitorTraining() {
             sx={{ px: 1.5 }}
           >
             Panel ochrony
+          </Button>
+          <Button
+            component={Link}
+            href="/admin"
+            variant="outlined"
+            color="secondary"
+            startIcon={<AdminPanelSettingsIcon />}
+            size="small"
+            sx={{ px: 1.5 }}
+          >
+            Panel admina
           </Button>
         </Box>
       </Stack>
