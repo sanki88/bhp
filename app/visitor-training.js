@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -160,13 +161,32 @@ export default function VisitorTraining() {
             variant="outlined"
             sx={{ mb: 1.5, fontWeight: 800 }}
           />
-          <Typography
-            variant="h2"
-            component="h1"
-            sx={{ fontWeight: 900, letterSpacing: 0 }}
-          >
-            BHP Guests
-          </Typography>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Box
+              sx={{
+                width: { xs: 82, sm: 104 },
+                height: { xs: 44, sm: 56 },
+                position: "relative",
+                flex: "0 0 auto",
+              }}
+            >
+              <Image
+                src="/MANLogo.png"
+                alt="MAN"
+                fill
+                priority
+                sizes="104px"
+                style={{ objectFit: "contain" }}
+              />
+            </Box>
+            <Typography
+              variant="h2"
+              component="h1"
+              sx={{ fontWeight: 900, letterSpacing: 0 }}
+            >
+              BHP Guests
+            </Typography>
+          </Stack>
         </Box>
         <Box
           sx={{
