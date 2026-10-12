@@ -1,37 +1,32 @@
 "use client";
 
-import Link from "next/link";
-import Image from "next/image";
-import { useMemo, useRef, useState } from "react";
+import BrandHeader from "@/_components/BrandHeader";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  Chip,
   FormControl,
   FormControlLabel,
   FormLabel,
   Grid,
-  LinearProgress,
   Paper,
   Radio,
   RadioGroup,
   Stack,
-  Step,
-  StepLabel,
-  Stepper,
   TextField,
   Typography,
 } from "@mui/material";
-import BadgeIcon from "@mui/icons-material/Badge";
-import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import PlayCircleIcon from "@mui/icons-material/PlayCircle";
 import RestartAltIcon from "@mui/icons-material/RestartAlt";
-import SecurityIcon from "@mui/icons-material/Security";
+import { normalizeLanguage } from "@/lib/languages";
+import { getUiCopy } from "@/lib/ui-copy";
+import { isValidPhone, PHONE_PATTERN } from "@/lib/phone.mjs";
+import "flag-icons/css/flag-icons.min.css";
 
 const initialVisitor = {
   firstName: "",
@@ -39,78 +34,77 @@ const initialVisitor = {
   phone: "",
   company: "",
   visitPurpose: "",
+  visitorType: "guest",
 };
 
-const steps = ["Dane", "Film", "Quiz", "Wpis do bazy"];
-
-const demoSlides = [
-  "Poruszaj sie tylko wyznaczonymi ciagami komunikacyjnymi.",
-  "Stosuj srodki ochrony osobistej wymagane w danej strefie.",
-  "Nie dotykaj maszyn, instalacji ani materialow bez zgody opiekuna.",
-  "W razie alarmu przerwij wizyte i kieruj sie do punktu zbiorki.",
-  "Kazdy wypadek, uraz lub zagrozenie zglos natychmiast opiekunowi.",
-];
-
-export default function VisitorTraining() {
+export default function VisitorTraining({
+  audience = "guest",
+  language = "pl",
+}) {
+  const activeLanguage = normalizeLanguage(language);
+  const copy = getUiCopy(activeLanguage);
+  const text = copy.training;
   const [step, setStep] = useState("form");
-  const [visitor, setVisitor] = useState(initialVisitor);
+  const [visitor, setVisitor] = useState(() => ({
+    ...initialVisitor,
+    visitorType: audience,
+  }));
   const [quiz, setQuiz] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loadingQuiz, setLoadingQuiz] = useState(false);
   const [result, setResult] = useState(null);
+  const [activeVideo, setActiveVideo] = useState(null);
   const [videoFailed, setVideoFailed] = useState(false);
-  const [demoProgress, setDemoProgress] = useState(0);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [videoEnded, setVideoEnded] = useState(false);
+  const [attemptId, setAttemptId] = useState("");
   const videoRef = useRef(null);
-  const demoBoxRef = useRef(null);
-  const demoTimer = useRef(null);
 
   const activeStep = { form: 0, video: 1, quiz: 2, success: 3 }[step];
+  const isSubcontractor = audience === "subcontractor";
+  const audienceKey = isSubcontractor ? "subcontractor" : "guest";
+  const audienceLabel = text.audience[audienceKey];
+  const visitorName =
+    `${visitor.firstName} ${visitor.lastName}`.trim() || text.visitorFallback;
+  const phoneError = visitor.phone !== "" && !isValidPhone(visitor.phone);
 
-  const visitorName = useMemo(() => {
-    return `${visitor.firstName} ${visitor.lastName}`.trim() || "Gosciu";
-  }, [visitor.firstName, visitor.lastName]);
+  useEffect(() => {
+    fetch(`/api/video?audience=${audience}&language=${activeLanguage}`, {
+      cache: "no-store",
+    })
+      .then((response) => response.json())
+      .then((data) => setActiveVideo(data.activeVideo))
+      .catch(() => setActiveVideo(null));
+  }, [audience, activeLanguage]);
 
   function updateVisitor(event) {
     const { name, value } = event.target;
+    if (name === "phone") event.target.setCustomValidity(value && !isValidPhone(value) ? text.form.phoneError : "");
     setVisitor((current) => ({ ...current, [name]: value }));
   }
 
   function handleFormSubmit(event) {
     event.preventDefault();
+    if (!isValidPhone(visitor.phone)) { setError(text.form.phoneError); return; }
+    if (!activeVideo) { setError(text.video.unavailable); return; }
+    setError("");
     setStep("video");
   }
 
   async function startQuiz() {
-    setLoadingQuiz(true);
-    setAnswers({});
-    setResult(null);
-
-    const response = await fetch("/api/quiz", { cache: "no-store" });
-    const data = await response.json();
-
-    setQuiz(data.questions);
-    setLoadingQuiz(false);
-    setStep("quiz");
-  }
-
-  function startDemoTraining() {
-    setDemoProgress(0);
-    window.clearInterval(demoTimer.current);
-    demoTimer.current = window.setInterval(() => {
-      setDemoProgress((current) => {
-        const next = Math.min(current + 2, 100);
-
-        if (next === 100) {
-          window.clearInterval(demoTimer.current);
-        }
-
-        return next;
-      });
-    }, 700);
+    setLoadingQuiz(true); setAnswers({}); setResult(null); setError("");
+    try {
+      const response = await fetch(`/api/quiz?language=${activeLanguage}&audience=${audience}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      setQuiz(data.questions); setAttemptId(data.attemptId); setStep("quiz");
+    } catch (error) { setError(error.message || text.video.unavailable); }
+    finally { setLoadingQuiz(false); }
   }
 
   async function openFullscreen() {
-    const target = videoFailed ? demoBoxRef.current : videoRef.current;
+    const target = videoRef.current;
 
     if (target?.requestFullscreen) {
       await target.requestFullscreen();
@@ -118,141 +112,68 @@ export default function VisitorTraining() {
   }
 
   async function submitQuiz(event) {
-    event.preventDefault();
-
-    const response = await fetch("/api/quiz", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ visitor, answers }),
-    });
-    const data = await response.json();
-
-    if (data.passed) {
+    event.preventDefault(); setSubmitting(true); setError("");
+    try {
+      const response = await fetch("/api/quiz", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visitor: { ...visitor, visitorType: audience }, language: activeLanguage, answers, attemptId }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
       setResult(data);
-      setStep("success");
-      return;
-    }
-
-    setResult(data);
+      if (data.passed) setStep("success");
+    } catch (error) { setError(error.message || text.video.unavailable); }
+    finally { setSubmitting(false); }
   }
 
   function resetFlow() {
-    setVisitor(initialVisitor);
+    setVisitor({ ...initialVisitor, visitorType: audience });
     setAnswers({});
     setQuiz([]);
     setResult(null);
     setStep("form");
+    setVideoFailed(false);
+    setVideoEnded(false);
+    setAttemptId("");
+    setError("");
   }
 
   return (
-    <Box component="main" className="app-shell">
-      <Stack
-        direction={{ xs: "column", md: "row" }}
-        spacing={3}
-        alignItems={{ xs: "stretch", md: "center" }}
-        justifyContent="space-between"
-        sx={{ mb: 3 }}
-      >
-        <Box>
-          <Chip
-            icon={<SecurityIcon />}
-            label="BHP dla gosci zakladu"
-            color="secondary"
-            variant="outlined"
-            sx={{ mb: 1.5, fontWeight: 800 }}
-          />
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Box
-              sx={{
-                width: { xs: 82, sm: 104 },
-                height: { xs: 44, sm: 56 },
-                position: "relative",
-                flex: "0 0 auto",
-              }}
-            >
-              <Image
-                src="/MANLogo.png"
-                alt="MAN"
-                fill
-                priority
-                sizes="104px"
-                style={{ objectFit: "contain" }}
-              />
-            </Box>
-            <Typography
-              variant="h2"
-              component="h1"
-              sx={{ fontWeight: 900, letterSpacing: 0 }}
-            >
-              BHP Guests
-            </Typography>
-          </Stack>
-        </Box>
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 1,
-            flex: 1,
-            mt: { xs: 2, md: 0 },
-          }}
-        >
-          <Button
-            component={Link}
-            href="/ochrona"
-            variant="outlined"
-            color="secondary"
-            startIcon={<BadgeIcon />}
-            size="small"
-            sx={{ px: 1.5 }}
-          >
-            Panel ochrony
-          </Button>
-          <Button
-            component={Link}
-            href="/admin"
-            variant="outlined"
-            color="secondary"
-            startIcon={<AdminPanelSettingsIcon />}
-            size="small"
-            sx={{ px: 1.5 }}
-          >
-            Panel admina
-          </Button>
-        </Box>
-      </Stack>
+    <Box component="main" className="app-shell" lang={activeLanguage}>
+      <BrandHeader
+        title={text.pageTitle[audienceKey]}
+        eyebrow={text.chip({ audienceLabel })}
+        subtitle={text.languageVersion({ languageLabel: copy.languageName })}
+      />
 
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, md: 3 }}>
-          <Paper
-            elevation={0}
-            sx={{
-              p: 2,
-              borderRadius: 2,
-              border: "1px solid",
-              borderColor: "divider",
-            }}
-          >
-            <Stepper activeStep={activeStep} orientation="vertical">
-              {steps.map((label) => (
-                <Step key={label}>
-                  <StepLabel>{label}</StepLabel>
-                </Step>
+          <Paper className="training-progress" elevation={0} sx={{ p: 1, border: "1px solid", borderColor: "divider" }}>
+            <ol className="progress-steps" aria-label={text.progressLabel}>
+              {text.steps.map((label, index) => (
+                <li key={label} className={`progress-step${index === activeStep ? " is-active" : index < activeStep ? " is-complete" : ""}`} aria-current={index === activeStep ? "step" : undefined}>
+                  <span className="step-number" aria-hidden="true">{index < activeStep ? "✓" : index + 1}</span>
+                  <span>{label}</span>
+                </li>
               ))}
-            </Stepper>
+            </ol>
           </Paper>
         </Grid>
 
         <Grid size={{ xs: 12, md: 9 }}>
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           {step === "form" && (
             <Card component="form" onSubmit={handleFormSubmit} elevation={0}>
               <CardContent sx={{ p: { xs: 2.5, md: 4 } }}>
-                <SectionHeading eyebrow="Krok 1" title="Dane goscia" />
+                <SectionHeading
+                  eyebrow={text.form.eyebrow}
+                  title={text.form.title[audienceKey]}
+                />
 
                 <Grid container spacing={2.5}>
                   <Grid size={{ xs: 12, sm: 6 }}>
                     <TextField
-                      label="Imie"
+                      label={text.form.firstName}
                       name="firstName"
                       value={visitor.firstName}
                       onChange={updateVisitor}
@@ -262,7 +183,7 @@ export default function VisitorTraining() {
                   </Grid>
                   <Grid size={{ xs: 12, sm: 6 }}>
                     <TextField
-                      label="Nazwisko"
+                      label={text.form.lastName}
                       name="lastName"
                       value={visitor.lastName}
                       onChange={updateVisitor}
@@ -272,18 +193,23 @@ export default function VisitorTraining() {
                   </Grid>
                   <Grid size={{ xs: 12, sm: 6 }}>
                     <TextField
-                      label="Nr telefonu"
+                      label={text.form.phone}
                       name="phone"
                       value={visitor.phone}
                       onChange={updateVisitor}
                       type="tel"
+                      autoComplete="tel"
+                      error={phoneError}
+                      helperText={phoneError ? text.form.phoneError : text.form.phoneHint}
+                      onInvalid={(event) => event.target.setCustomValidity(text.form.phoneError)}
+                      slotProps={{ htmlInput: { inputMode: "tel", pattern: PHONE_PATTERN, maxLength: 160 } }}
                       required
                       fullWidth
                     />
                   </Grid>
                   <Grid size={{ xs: 12, sm: 6 }}>
                     <TextField
-                      label="Nazwa firmy"
+                      label={text.form.company}
                       name="company"
                       value={visitor.company}
                       onChange={updateVisitor}
@@ -293,7 +219,7 @@ export default function VisitorTraining() {
                   </Grid>
                   <Grid size={12}>
                     <TextField
-                      label="Cel przyjazdu"
+                      label={text.form.visitPurpose}
                       name="visitPurpose"
                       value={visitor.visitPurpose}
                       onChange={updateVisitor}
@@ -301,7 +227,7 @@ export default function VisitorTraining() {
                       fullWidth
                       multiline
                       minRows={4}
-                      placeholder="Np. serwis, dostawa, spotkanie"
+                      placeholder={text.form.visitPurposePlaceholder}
                     />
                   </Grid>
                 </Grid>
@@ -312,9 +238,9 @@ export default function VisitorTraining() {
                   color="primary"
                   size="large"
                   startIcon={<PlayCircleIcon />}
-                  sx={{ mt: 3 }}
+                  sx={{ mt: 3, width: { xs: "100%", sm: "auto" } }}
                 >
-                  Rozpocznij szkolenie
+                  {text.form.submit}
                 </Button>
               </CardContent>
             </Card>
@@ -323,52 +249,18 @@ export default function VisitorTraining() {
           {step === "video" && (
             <Card elevation={0}>
               <CardContent sx={{ p: { xs: 2.5, md: 4 } }}>
-                <SectionHeading eyebrow="Krok 2" title="Film szkoleniowy" />
+                <SectionHeading
+                  eyebrow={text.video.eyebrow}
+                  title={text.video.title}
+                />
 
-                {!videoFailed ? (
-                  <Box
-                    component="video"
-                    ref={videoRef}
-                    className="training-video"
-                    src="/szkolenie-bhp.mp4"
-                    controls={false}
-                    autoPlay
-                    playsInline
-                    onEnded={startQuiz}
-                    onError={() => {
-                      setVideoFailed(true);
-                      startDemoTraining();
-                    }}
+                {!videoFailed && activeVideo ? (
+                  <Box component="video" ref={videoRef} className="training-video"
+                    src={activeVideo.url} controls autoPlay playsInline
+                    onEnded={() => { setVideoEnded(true); startQuiz(); }}
+                    onError={() => { setVideoFailed(true); setError(text.video.unavailable); }}
                   />
-                ) : (
-                  <Box
-                    ref={demoBoxRef}
-                    className="demo-video"
-                    role="img"
-                    aria-label="Demonstracyjne szkolenie BHP"
-                  >
-                    <Typography className="demo-frame" component="div">
-                      {
-                        demoSlides[
-                          Math.min(
-                            Math.floor(demoProgress / 20),
-                            demoSlides.length - 1,
-                          )
-                        ]
-                      }
-                    </Typography>
-                    <LinearProgress
-                      variant="determinate"
-                      value={demoProgress}
-                      color="primary"
-                    />
-                    <Typography>
-                      {demoProgress < 100
-                        ? "Trwa szkolenie..."
-                        : "Szkolenie zakonczone."}
-                    </Typography>
-                  </Box>
-                )}
+                ) : <Alert severity="error">{text.video.unavailable}</Alert>}
 
                 <Stack
                   direction={{ xs: "column", sm: "row" }}
@@ -381,17 +273,17 @@ export default function VisitorTraining() {
                     startIcon={<FullscreenIcon />}
                     onClick={openFullscreen}
                   >
-                    Pelny ekran
+                    {text.video.fullscreen}
                   </Button>
                   <Button
                     variant="contained"
                     color="primary"
                     type="button"
                     onClick={startQuiz}
-                    disabled={!videoFailed || demoProgress < 100 || loadingQuiz}
+                    disabled={!videoEnded || videoFailed || loadingQuiz}
                     startIcon={<FactCheckIcon />}
                   >
-                    {loadingQuiz ? "Losowanie pytan..." : "Przejdz do quizu"}
+                    {loadingQuiz ? text.video.loadingQuiz : text.video.goToQuiz}
                   </Button>
                 </Stack>
               </CardContent>
@@ -402,55 +294,65 @@ export default function VisitorTraining() {
             <Card component="form" onSubmit={submitQuiz} elevation={0}>
               <CardContent sx={{ p: { xs: 2.5, md: 4 } }}>
                 <SectionHeading
-                  eyebrow="Krok 3"
-                  title="Quiz BHP"
-                  subtitle="Aby zostac dopisanym do bazy, odpowiedz poprawnie na 5 pytan."
+                  eyebrow={text.quiz.eyebrow}
+                  title={text.quiz.title}
+                  subtitle={text.quiz.subtitle}
                 />
 
-                <Stack spacing={2.5}>
-                  {quiz.map((question, index) => (
-                    <Paper
-                      key={question.id}
-                      elevation={0}
-                      sx={{
-                        p: 2.5,
-                        border: "1px solid",
-                        borderColor: "divider",
-                      }}
-                    >
-                      <FormControl required fullWidth>
-                        <FormLabel
-                          sx={{ color: "text.primary", fontWeight: 900, mb: 1 }}
-                        >
-                          {index + 1}. {question.text}
-                        </FormLabel>
-                        <RadioGroup
-                          name={question.id}
-                          value={answers[question.id] || ""}
-                          onChange={(event) =>
-                            setAnswers((current) => ({
-                              ...current,
-                              [question.id]: event.target.value,
-                            }))
-                          }
-                        >
-                          {question.options.map((option) => (
-                            <FormControlLabel
-                              key={option.id}
-                              value={option.id}
-                              control={<Radio color="primary" />}
-                              label={option.text}
-                            />
-                          ))}
-                        </RadioGroup>
-                      </FormControl>
-                    </Paper>
-                  ))}
-                </Stack>
+                {quiz.length < 5 ? (
+                  <Alert severity="warning">
+                    {text.quiz.notEnoughQuestions}
+                  </Alert>
+                ) : (
+                  <Stack spacing={2.5}>
+                    {quiz.map((question, index) => (
+                      <Paper
+                        key={question.id}
+                        elevation={0}
+                        sx={{
+                          p: 2.5,
+                          border: "1px solid",
+                          borderColor: "divider",
+                        }}
+                      >
+                        <FormControl required fullWidth>
+                          <FormLabel
+                            sx={{
+                              color: "text.primary",
+                              fontWeight: 700,
+                              mb: 1,
+                            }}
+                          >
+                            {index + 1}. {question.text}
+                          </FormLabel>
+                          <RadioGroup
+                            name={question.id}
+                            value={answers[question.id] || ""}
+                            onChange={(event) =>
+                              setAnswers((current) => ({
+                                ...current,
+                                [question.id]: event.target.value,
+                              }))
+                            }
+                          >
+                            {question.options.map((option) => (
+                              <FormControlLabel
+                                key={option.id}
+                                value={option.id}
+                                control={<Radio color="primary" />}
+                                label={option.text}
+                              />
+                            ))}
+                          </RadioGroup>
+                        </FormControl>
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
 
                 {result && !result.passed && (
                   <Alert severity="warning" sx={{ mt: 2.5 }}>
-                    Wynik: {result.score}/5. Quiz trzeba zaliczyc bezblednie.
+                    {text.quiz.result({ score: result.score })}
                   </Alert>
                 )}
 
@@ -461,8 +363,9 @@ export default function VisitorTraining() {
                   size="large"
                   startIcon={<FactCheckIcon />}
                   sx={{ mt: 3 }}
+                  disabled={quiz.length < 5 || submitting || Object.keys(answers).length !== 5}
                 >
-                  Sprawdz odpowiedzi
+                  {text.quiz.submit}
                 </Button>
               </CardContent>
             </Card>
@@ -472,10 +375,18 @@ export default function VisitorTraining() {
             <Card elevation={0}>
               <CardContent sx={{ p: { xs: 2.5, md: 4 } }}>
                 <SectionHeading
-                  eyebrow="Gotowe"
-                  title={`${visitorName}, szkolenie zostalo zaliczone`}
-                  subtitle="Dane zostaly zapisane w bazie. Ochrona zobaczy wpis w panelu wejsc."
+                  eyebrow={text.success.eyebrow}
+                  title={text.success.title({ visitorName })}
+                  subtitle={text.success.subtitle}
                 />
+                {result?.visitor?.blacklisted && (
+                  <Alert severity="error" sx={{ mb: 3 }}>
+                    {text.success.blacklist({
+                      reason:
+                        result.visitor.blacklistReason || text.success.noReason,
+                    })}
+                  </Alert>
+                )}
                 <Stack
                   direction={{ xs: "column", sm: "row" }}
                   spacing={2}
@@ -487,38 +398,18 @@ export default function VisitorTraining() {
                       p: 2,
                       border: "1px solid",
                       borderColor: "divider",
-                      minWidth: 260,
+                      minWidth: 0, width: { xs: "100%", sm: 260 },
                     }}
                   >
                     <Typography
                       variant="overline"
                       color="text.secondary"
-                      sx={{ fontWeight: 900 }}
+                      sx={{ fontWeight: 700 }}
                     >
-                      Nr przepustki
+                      {text.success.validUntil}
                     </Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 900 }}>
-                      {result?.visitor?.passNumber}
-                    </Typography>
-                  </Paper>
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 2,
-                      border: "1px solid",
-                      borderColor: "divider",
-                      minWidth: 260,
-                    }}
-                  >
-                    <Typography
-                      variant="overline"
-                      color="text.secondary"
-                      sx={{ fontWeight: 900 }}
-                    >
-                      Wazna do
-                    </Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 900 }}>
-                      {formatDate(result?.visitor?.expiresAt)}
+                    <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                      {formatDate(result?.visitor?.expiresAt, copy.locale)}
                     </Typography>
                   </Paper>
                 </Stack>
@@ -528,7 +419,7 @@ export default function VisitorTraining() {
                   startIcon={<RestartAltIcon />}
                   onClick={resetFlow}
                 >
-                  Zarejestruj kolejnego goscia
+                  {text.success.reset}
                 </Button>
               </CardContent>
             </Card>
@@ -545,14 +436,14 @@ function SectionHeading({ eyebrow, title, subtitle }) {
       <Typography
         variant="overline"
         color="primary.main"
-        sx={{ fontWeight: 900 }}
+        sx={{ fontWeight: 700 }}
       >
         {eyebrow}
       </Typography>
       <Typography
         variant="h4"
         component="h2"
-        sx={{ fontWeight: 900, lineHeight: 1.1 }}
+        sx={{ fontWeight: 700, lineHeight: 1.25 }}
       >
         {title}
       </Typography>
@@ -565,10 +456,10 @@ function SectionHeading({ eyebrow, title, subtitle }) {
   );
 }
 
-function formatDate(value) {
+function formatDate(value, locale) {
   if (!value) {
     return "-";
   }
 
-  return new Date(value).toLocaleDateString("pl-PL");
+  return new Date(value).toLocaleDateString(locale);
 }

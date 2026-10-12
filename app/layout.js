@@ -1,9 +1,10 @@
 import "./globals.css";
+import "flag-icons/css/flag-icons.min.css";
 import AppThemeProvider from "./theme-provider";
 
 export const metadata = {
-  title: "BHP dla gosci",
-  description: "Rejestracja gosci, szkolenie BHP i panel ochrony.",
+  title: "BHP | Rejestracja i szkolenia",
+  description: "Rejestracja gości, szkolenia BHP i panel ochrony.",
 };
 
 export default function RootLayout({ children }) {
